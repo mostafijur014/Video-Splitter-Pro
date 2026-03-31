@@ -85,56 +85,82 @@ async function startServer() {
 
   // API: Chunked Upload
   app.post("/api/upload-chunk", upload.single("chunk"), async (req, res) => {
-    const { jobId, chunkIndex, totalChunks, filename } = req.body;
-    
-    if (!req.file || !jobId || !chunkIndex || !totalChunks) {
-      return res.status(400).json({ error: "Missing chunk data" });
-    }
-
-    const chunkDir = path.join(UPLOADS_DIR, jobId, "chunks");
-    await fs.ensureDir(chunkDir);
-    
-    const chunkPath = path.join(chunkDir, `chunk_${chunkIndex}`);
-    await fs.move(req.file.path, chunkPath, { overwrite: true });
-
-    const uploadedChunks = await fs.readdir(chunkDir);
-    if (uploadedChunks.length === parseInt(totalChunks)) {
-      // All chunks received, merge them
-      const finalPath = path.join(UPLOADS_DIR, jobId, filename);
-      const writeStream = fs.createWriteStream(finalPath);
+    try {
+      const { jobId, chunkIndex, totalChunks, filename } = req.body;
       
-      for (let i = 0; i < totalChunks; i++) {
-        const partPath = path.join(chunkDir, `chunk_${i}`);
-        const buffer = await fs.readFile(partPath);
-        writeStream.write(buffer);
-        await fs.remove(partPath);
+      console.log(`Received chunk ${chunkIndex}/${totalChunks} for job ${jobId}`);
+
+      if (!req.file || !jobId || chunkIndex === undefined || !totalChunks) {
+        console.error("Missing chunk data:", { file: !!req.file, jobId, chunkIndex, totalChunks });
+        return res.status(400).json({ error: "Missing chunk data" });
       }
+
+      const chunkDir = path.join(UPLOADS_DIR, jobId, "chunks");
+      await fs.ensureDir(chunkDir);
       
-      writeStream.end();
-      
-      writeStream.on("finish", async () => {
-        await fs.remove(chunkDir);
+      const chunkPath = path.join(chunkDir, `chunk_${chunkIndex}`);
+      await fs.move(req.file.path, chunkPath, { overwrite: true });
+
+      // Clean up the temporary directory created by multer
+      const tempDir = path.dirname(req.file.path);
+      await fs.remove(tempDir).catch(console.error);
+
+      const uploadedChunks = await fs.readdir(chunkDir);
+      console.log(`Chunks uploaded for ${jobId}: ${uploadedChunks.length}/${totalChunks}`);
+
+      if (uploadedChunks.length === parseInt(totalChunks)) {
+        console.log(`All chunks received for ${jobId}, merging...`);
+        // All chunks received, merge them
+        const finalPath = path.join(UPLOADS_DIR, jobId, filename);
+        const writeStream = fs.createWriteStream(finalPath);
         
-        // Now probe the merged file
-        ffmpeg.ffprobe(finalPath, (probeErr, metadata) => {
-          if (probeErr) {
-            fs.remove(path.dirname(finalPath)).catch(console.error);
-            return res.status(500).json({ 
-              error: "Video analysis failed after merge",
-              details: probeErr.message 
-            });
+        for (let i = 0; i < totalChunks; i++) {
+          const partPath = path.join(chunkDir, `chunk_${i}`);
+          if (!fs.existsSync(partPath)) {
+            throw new Error(`Missing chunk ${i}`);
           }
+          const buffer = await fs.readFile(partPath);
+          writeStream.write(buffer);
+          await fs.remove(partPath);
+        }
+        
+        writeStream.end();
+        
+        writeStream.on("finish", async () => {
+          console.log(`Merge complete for ${jobId}: ${finalPath}`);
+          await fs.remove(chunkDir);
           
-          res.json({
-            status: "complete",
-            jobId,
-            duration: metadata.format.duration,
-            filename: filename,
+          // Now probe the merged file
+          ffmpeg.ffprobe(finalPath, (probeErr, metadata) => {
+            if (probeErr) {
+              console.error(`FFprobe error after merge for ${jobId}:`, probeErr);
+              fs.remove(path.dirname(finalPath)).catch(console.error);
+              return res.status(500).json({ 
+                error: "Video analysis failed after merge",
+                details: probeErr.message 
+              });
+            }
+            
+            console.log(`Probe successful for ${jobId}, duration: ${metadata.format.duration}`);
+            res.json({
+              status: "complete",
+              jobId,
+              duration: metadata.format.duration,
+              filename: filename,
+            });
           });
         });
-      });
-    } else {
-      res.json({ status: "chunk_received", received: uploadedChunks.length });
+
+        writeStream.on("error", (err) => {
+          console.error(`Write stream error for ${jobId}:`, err);
+          res.status(500).json({ error: "Merge failed", details: err.message });
+        });
+      } else {
+        res.json({ status: "chunk_received", received: uploadedChunks.length });
+      }
+    } catch (err: any) {
+      console.error("Chunk upload error:", err);
+      res.status(500).json({ error: "Chunk upload failed", details: err.message });
     }
   });
 

@@ -78,11 +78,11 @@ export default function App() {
         const chunk = file.slice(start, end);
 
         const formData = new FormData();
-        formData.append('chunk', chunk);
         formData.append('jobId', jobId);
         formData.append('chunkIndex', i.toString());
         formData.append('totalChunks', totalChunks.toString());
         formData.append('filename', file.name);
+        formData.append('chunk', chunk);
 
         const response = await axios.post('/api/upload-chunk', formData, {
           onUploadProgress: (progressEvent) => {
