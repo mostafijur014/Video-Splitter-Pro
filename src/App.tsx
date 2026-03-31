@@ -97,16 +97,32 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      console.error("Upload error details:", err);
+      console.error("Full upload error object:", err);
+      
+      let errorMessage = "Upload failed";
+      let detailMessage = "No details provided";
+
       if (err.response) {
-        const serverError = err.response.data?.error;
-        const serverDetails = err.response.data?.details;
-        setError(`${serverError || "Server Error"}: ${serverDetails || "No details provided"}`);
+        // Server responded with a status code outside 2xx
+        const data = err.response.data;
+        if (typeof data === 'string') {
+          errorMessage = `Server Error (${err.response.status})`;
+          detailMessage = data;
+        } else if (data && typeof data === 'object') {
+          errorMessage = typeof data.error === 'string' ? data.error : `Error ${err.response.status}`;
+          detailMessage = typeof data.details === 'string' ? data.details : JSON.stringify(data);
+        }
       } else if (err.request) {
-        setError("Network error: The server might be blocking large requests. Trying chunked upload...");
+        // Request was made but no response received
+        errorMessage = "Network Error";
+        detailMessage = "The server did not respond. This usually happens if the file is too large or the server is restarting.";
       } else {
-        setError(`Error: ${err.message}`);
+        // Something else happened
+        errorMessage = "Application Error";
+        detailMessage = err.message;
       }
+
+      setError(`${errorMessage}: ${detailMessage}`);
     } finally {
       setUploading(false);
     }

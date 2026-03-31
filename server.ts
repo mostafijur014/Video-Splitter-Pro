@@ -19,9 +19,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Ensure directories exist
-  const UPLOADS_DIR = path.join(process.cwd(), "uploads");
-  const OUTPUTS_DIR = path.join(process.cwd(), "outputs");
+  // Use /tmp for uploads and outputs to be more compatible with restricted environments
+  const UPLOADS_DIR = path.join("/tmp", "video-splitter", "uploads");
+  const OUTPUTS_DIR = path.join("/tmp", "video-splitter", "outputs");
   await fs.ensureDir(UPLOADS_DIR);
   await fs.ensureDir(OUTPUTS_DIR);
 
