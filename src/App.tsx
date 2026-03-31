@@ -67,7 +67,7 @@ export default function App() {
     setUploadProgress(0);
     setError(null);
 
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+    const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB chunks (Vercel limit is 4.5MB)
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const jobId = Math.random().toString(36).substring(7);
 
