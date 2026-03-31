@@ -55,6 +55,11 @@ async function startServer() {
     next();
   });
 
+  // API routes
+  app.get("/api", (req, res) => {
+    res.json({ message: "Video Splitter Pro API is running" });
+  });
+
   // Debug Endpoint
   app.get("/api/debug", async (req, res) => {
     try {
@@ -274,6 +279,7 @@ async function startServer() {
 
   // Serve static files from outputs for preview
   app.use("/outputs", express.static(OUTPUTS_DIR));
+  app.use("/api/outputs", express.static(OUTPUTS_DIR));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
