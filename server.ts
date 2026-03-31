@@ -19,11 +19,22 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Use /tmp for uploads and outputs to be more compatible with restricted environments
-  const UPLOADS_DIR = path.join("/tmp", "video-splitter", "uploads");
-  const OUTPUTS_DIR = path.join("/tmp", "video-splitter", "outputs");
+  // Ensure directories exist
+  const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+  const OUTPUTS_DIR = path.join(process.cwd(), "outputs");
   await fs.ensureDir(UPLOADS_DIR);
   await fs.ensureDir(OUTPUTS_DIR);
+
+  // Helper to sanitize filenames
+  const sanitizeFilename = (name: string): string => {
+    const ext = path.extname(name);
+    const base = path.basename(name, ext);
+    const sanitized = base
+      .replace(/[^a-z0-9]/gi, "_") // Replace non-alphanumeric with underscore
+      .replace(/_{2,}/g, "_") // Replace multiple underscores with one
+      .slice(0, 50); // Limit base to 50 characters to avoid MAX_PATH issues
+    return `${sanitized || "video"}${ext}`;
+  };
 
   // Configure Multer
   const storage = multer.diskStorage({
@@ -34,7 +45,7 @@ async function startServer() {
       cb(null, dir);
     },
     filename: (req, file, cb) => {
-      cb(null, file.originalname);
+      cb(null, sanitizeFilename(file.originalname));
     },
   });
 
@@ -55,11 +66,6 @@ async function startServer() {
     next();
   });
 
-  // API routes
-  app.get("/api", (req, res) => {
-    res.json({ message: "Video Splitter Pro API is running" });
-  });
-
   // Debug Endpoint
   app.get("/api/debug", async (req, res) => {
     try {
@@ -68,7 +74,7 @@ async function startServer() {
       
       res.json({
         status: "ok",
-        version: "1.0.2",
+        version: "1.0.3",
         ffmpegPath: ffmpegStatic,
         ffprobePath: ffprobeStatic.path,
         uploadsDir: UPLOADS_DIR,
@@ -85,82 +91,57 @@ async function startServer() {
 
   // API: Chunked Upload
   app.post("/api/upload-chunk", upload.single("chunk"), async (req, res) => {
-    try {
-      const { jobId, chunkIndex, totalChunks, filename } = req.body;
-      
-      console.log(`Received chunk ${chunkIndex}/${totalChunks} for job ${jobId}`);
+    const { jobId, chunkIndex, totalChunks, filename: originalFilename } = req.body;
+    
+    if (!req.file || !jobId || !chunkIndex || !totalChunks) {
+      return res.status(400).json({ error: "Missing chunk data" });
+    }
 
-      if (!req.file || !jobId || chunkIndex === undefined || !totalChunks) {
-        console.error("Missing chunk data:", { file: !!req.file, jobId, chunkIndex, totalChunks });
-        return res.status(400).json({ error: "Missing chunk data" });
+    const filename = sanitizeFilename(originalFilename || "video.mp4");
+    const chunkDir = path.join(UPLOADS_DIR, jobId, "chunks");
+    await fs.ensureDir(chunkDir);
+    
+    const chunkPath = path.join(chunkDir, `chunk_${chunkIndex}`);
+    await fs.move(req.file.path, chunkPath, { overwrite: true });
+
+    const uploadedChunks = await fs.readdir(chunkDir);
+    if (uploadedChunks.length === parseInt(totalChunks)) {
+      // All chunks received, merge them
+      const finalPath = path.join(UPLOADS_DIR, jobId, filename);
+      const writeStream = fs.createWriteStream(finalPath);
+      
+      for (let i = 0; i < totalChunks; i++) {
+        const partPath = path.join(chunkDir, `chunk_${i}`);
+        const buffer = await fs.readFile(partPath);
+        writeStream.write(buffer);
+        await fs.remove(partPath);
       }
-
-      const chunkDir = path.join(UPLOADS_DIR, jobId, "chunks");
-      await fs.ensureDir(chunkDir);
       
-      const chunkPath = path.join(chunkDir, `chunk_${chunkIndex}`);
-      await fs.move(req.file.path, chunkPath, { overwrite: true });
-
-      // Clean up the temporary directory created by multer
-      const tempDir = path.dirname(req.file.path);
-      await fs.remove(tempDir).catch(console.error);
-
-      const uploadedChunks = await fs.readdir(chunkDir);
-      console.log(`Chunks uploaded for ${jobId}: ${uploadedChunks.length}/${totalChunks}`);
-
-      if (uploadedChunks.length === parseInt(totalChunks)) {
-        console.log(`All chunks received for ${jobId}, merging...`);
-        // All chunks received, merge them
-        const finalPath = path.join(UPLOADS_DIR, jobId, filename);
-        const writeStream = fs.createWriteStream(finalPath);
+      writeStream.end();
+      
+      writeStream.on("finish", async () => {
+        await fs.remove(chunkDir);
         
-        for (let i = 0; i < totalChunks; i++) {
-          const partPath = path.join(chunkDir, `chunk_${i}`);
-          if (!fs.existsSync(partPath)) {
-            throw new Error(`Missing chunk ${i}`);
-          }
-          const buffer = await fs.readFile(partPath);
-          writeStream.write(buffer);
-          await fs.remove(partPath);
-        }
-        
-        writeStream.end();
-        
-        writeStream.on("finish", async () => {
-          console.log(`Merge complete for ${jobId}: ${finalPath}`);
-          await fs.remove(chunkDir);
-          
-          // Now probe the merged file
-          ffmpeg.ffprobe(finalPath, (probeErr, metadata) => {
-            if (probeErr) {
-              console.error(`FFprobe error after merge for ${jobId}:`, probeErr);
-              fs.remove(path.dirname(finalPath)).catch(console.error);
-              return res.status(500).json({ 
-                error: "Video analysis failed after merge",
-                details: probeErr.message 
-              });
-            }
-            
-            console.log(`Probe successful for ${jobId}, duration: ${metadata.format.duration}`);
-            res.json({
-              status: "complete",
-              jobId,
-              duration: metadata.format.duration,
-              filename: filename,
+        // Now probe the merged file
+        ffmpeg.ffprobe(finalPath, (probeErr, metadata) => {
+          if (probeErr) {
+            fs.remove(path.dirname(finalPath)).catch(console.error);
+            return res.status(500).json({ 
+              error: "Video analysis failed after merge",
+              details: probeErr.message 
             });
+          }
+          
+          res.json({
+            status: "complete",
+            jobId,
+            duration: metadata.format.duration,
+            filename: filename,
           });
         });
-
-        writeStream.on("error", (err) => {
-          console.error(`Write stream error for ${jobId}:`, err);
-          res.status(500).json({ error: "Merge failed", details: err.message });
-        });
-      } else {
-        res.json({ status: "chunk_received", received: uploadedChunks.length });
-      }
-    } catch (err: any) {
-      console.error("Chunk upload error:", err);
-      res.status(500).json({ error: "Chunk upload failed", details: err.message });
+      });
+    } else {
+      res.json({ status: "chunk_received", received: uploadedChunks.length });
     }
   });
 
@@ -204,7 +185,7 @@ async function startServer() {
         res.json({
           jobId,
           duration: metadata.format.duration,
-          filename: req.file?.originalname,
+          filename: sanitizeFilename(req.file?.originalname || "video.mp4"),
         });
       });
     });
@@ -305,7 +286,6 @@ async function startServer() {
 
   // Serve static files from outputs for preview
   app.use("/outputs", express.static(OUTPUTS_DIR));
-  app.use("/api/outputs", express.static(OUTPUTS_DIR));
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
@@ -347,13 +327,6 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
-
-  return app;
 }
 
-const appPromise = startServer();
-
-export default async (req: any, res: any) => {
-  const app = await appPromise;
-  return app(req, res);
-};
+startServer().catch(console.error);

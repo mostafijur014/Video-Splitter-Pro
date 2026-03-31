@@ -1,20 +1,45 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Video Splitter Pro
 
-# Run and deploy your AI Studio app
+Professional video splitting tool. Split long videos into segments by duration or equal parts instantly.
 
-This contains everything you need to run your app locally.
+## 🚀 Local Setup Instructions
 
-View your app in AI Studio: https://ai.studio/apps/e9b0fc6d-d5d2-4559-af5c-bda3e3f44ec9
+### 1. Prerequisites
+- **Node.js** (v18 or higher)
+- **FFmpeg** installed on your system.
 
-## Run Locally
+### 2. Install FFmpeg
+- **macOS (Homebrew):** `brew install ffmpeg`
+- **Ubuntu/Debian:** `sudo apt update && sudo apt install ffmpeg`
+- **Windows (Chocolatey):** `choco install ffmpeg`
+- **Windows (Manual):** Download from [ffmpeg.org](https://ffmpeg.org/download.html), extract, and add the `bin` folder to your System Environment Variables.
 
-**Prerequisites:**  Node.js
+### 3. Troubleshooting: "Scripts are disabled on this system" (Windows)
+If you see an error like `npm.ps1 cannot be loaded because running scripts is disabled`, run this command in your PowerShell as **Administrator**:
 
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+Type `Y` and press Enter when prompted.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### 4. Run the App
+1. Open your terminal in the project root.
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+4. Open your browser to `http://localhost:3000`.
+
+## 📁 Project Structure
+- `server.ts`: Node.js Express server with FFmpeg integration.
+- `src/App.tsx`: React frontend with chunked upload support.
+- `uploads/`: Temporary storage for uploads.
+- `outputs/`: Storage for processed segments.
+
+## 🔐 Security
+- Files are automatically deleted after 1 hour.
+- Chunked uploads bypass proxy size limits (413 errors).

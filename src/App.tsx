@@ -67,7 +67,7 @@ export default function App() {
     setUploadProgress(0);
     setError(null);
 
-    const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB chunks (Vercel limit is 4.5MB)
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const jobId = Math.random().toString(36).substring(7);
 
@@ -78,11 +78,11 @@ export default function App() {
         const chunk = file.slice(start, end);
 
         const formData = new FormData();
+        formData.append('chunk', chunk);
         formData.append('jobId', jobId);
         formData.append('chunkIndex', i.toString());
         formData.append('totalChunks', totalChunks.toString());
         formData.append('filename', file.name);
-        formData.append('chunk', chunk);
 
         const response = await axios.post('/api/upload-chunk', formData, {
           onUploadProgress: (progressEvent) => {
@@ -97,32 +97,16 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      console.error("Full upload error object:", err);
-      
-      let errorMessage = "Upload failed";
-      let detailMessage = "No details provided";
-
+      console.error("Upload error details:", err);
       if (err.response) {
-        // Server responded with a status code outside 2xx
-        const data = err.response.data;
-        if (typeof data === 'string') {
-          errorMessage = `Server Error (${err.response.status})`;
-          detailMessage = data;
-        } else if (data && typeof data === 'object') {
-          errorMessage = typeof data.error === 'string' ? data.error : `Error ${err.response.status}`;
-          detailMessage = typeof data.details === 'string' ? data.details : JSON.stringify(data);
-        }
+        const serverError = err.response.data?.error;
+        const serverDetails = err.response.data?.details;
+        setError(`${serverError || "Server Error"}: ${serverDetails || "No details provided"}`);
       } else if (err.request) {
-        // Request was made but no response received
-        errorMessage = "Network Error";
-        detailMessage = "The server did not respond. This usually happens if the file is too large or the server is restarting.";
+        setError("Network error: The server might be blocking large requests. Trying chunked upload...");
       } else {
-        // Something else happened
-        errorMessage = "Application Error";
-        detailMessage = err.message;
+        setError(`Error: ${err.message}`);
       }
-
-      setError(`${errorMessage}: ${detailMessage}`);
     } finally {
       setUploading(false);
     }
@@ -472,7 +456,7 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-12 mt-12">
         <div className="max-w-7xl mx-auto px-4 text-center">
-          <p className="text-slate-400 text-sm">© 2026 VideoSplitter Pro. v1.0.2. All rights reserved.</p>
+          <p className="text-slate-400 text-sm">© 2026 VideoSplitter Pro. v1.0.3. All rights reserved.</p>
         </div>
       </footer>
     </div>
